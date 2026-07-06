@@ -23,9 +23,9 @@ FLIGHTS = {
         "dep_time": "18:15", "arr_time": "19:40",
         "date": "2026-07-06", "status": "scheduled"
     },
-    "IB121": {
-        "flight_iata": "IB121",
-        "callsign_variants": ["IBE121", "IBE0121", "IBE121 ", "IBE0121 "],
+    "IB123": {
+        "flight_iata": "IB123",
+        "callsign_variants": ["IBE123", "IBE0123", "IBE123 ", "IBE0123 "],
         "airline": "Iberia",
         "dep": {"code": "MAD", "name": "Madrid", "lat": 40.4722, "lon": -3.5634},
         "arr": {"code": "LIM", "name": "Lima", "lat": -12.0219, "lon": -77.1143},
