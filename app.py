@@ -43,15 +43,17 @@ def fetch_pocketworld():
                         headers={"User-Agent": "GenioTracker/1.0"})
         if r.status_code == 200:
             data = r.json()
+            # PocketWorld puede devolver un array plano [{...}] o {"flights": [{...}]}
             if isinstance(data, list):
-                log.info(f"PocketWorld: {len(data)} flights")
+                log.info(f"PocketWorld: {len(data)} flights (array)")
                 return data
-        else:
-            log.warning(f"PocketWorld HTTP {r.status_code}")
-            return None
-    except Exception as e:
-        log.warning(f"PocketWorld error: {e}")
-        return None
+            elif isinstance(data, dict) and "flights" in data:
+                flights = data["flights"]
+                log.info(f"PocketWorld: {len(flights)} flights (object)")
+                return flights
+            else:
+                log.warning(f"PocketWorld: formato inesperado: {type(data).__name__}")
+                return None
 
 def match_flight(flights, callsign_variants):
     """Busca un vuelo por variantes de callsign en los datos de PocketWorld"""
@@ -80,19 +82,6 @@ def match_flight(flights, callsign_variants):
 @app.route("/")
 def index():
     return render_template("index.html", flights=FLIGHTS)
-
-@app.route("/api/ping")
-def ping():
-    """Endpoint de prueba para verificar conectividad"""
-    import socket
-    try:
-        ip = socket.gethostbyname("pocketworld.org")
-        r = requests.get("https://pocketworld.org/api/flights", timeout=10,
-                        headers={"User-Agent": "GenioTracker/1.0"})
-        body = r.text[:500] if r.status_code == 200 else r.text[:200]
-        return jsonify({"status": "ok", "pocketworld_ip": ip, "http": r.status_code, "body_start": body})
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)})
 
 @app.route("/api/track")
 def track():
