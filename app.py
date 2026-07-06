@@ -37,17 +37,40 @@ FLIGHTS = {
 _cache = {"data": None, "ts": 0, "ttl": 30}
 
 def fetch_pocketworld():
-    """Obtiene TODOS los vuelos en vivo desde PocketWorld (sin API key)"""
-    try:
-        r = requests.get("https://pocketworld.org/api/flights", timeout=15)
-        if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list):
-                return data
-        return None
-    except Exception as e:
-        log.warning(f"PocketWorld error: {e}")
-        return None
+    """Busca vuelos en PocketWorld por callsign (más rápido que traer todos)"""
+    # Intentar por aeropuertos primero (datos más ligeros)
+    airports_to_check = ["MAD", "BCN", "LIM", "BIO"]
+    results = []
+    for apt in airports_to_check:
+        try:
+            r = requests.get(f"https://pocketworld.org/api/airport/{apt}/flights", timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                flights = data.get("flights", [])
+                if flights:
+                    results.extend(flights)
+            # Arrivals y departures
+            r2 = requests.get(f"https://pocketworld.org/api/airport/{apt}/flights?type=departures", timeout=10)
+            if r2.status_code == 200:
+                data2 = r2.json()
+                flights2 = data2.get("flights", [])
+                if flights2:
+                    results.extend(flights2)
+        except Exception as e:
+            log.warning(f"PocketWorld airport {apt}: {e}")
+    
+    # Si no encontramos nada por aeropuertos, traer todos
+    if not results:
+        try:
+            r = requests.get("https://pocketworld.org/api/flights", timeout=20)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            log.warning(f"PocketWorld all flights: {e}")
+    
+    return results if results else None
 
 def match_flight(flights, callsign_variants):
     """Busca un vuelo por variantes de callsign en los datos de PocketWorld"""
