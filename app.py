@@ -54,6 +54,13 @@ def fetch_pocketworld():
             else:
                 log.warning(f"PocketWorld: formato inesperado: {type(data).__name__}")
                 return None
+        else:
+            log.warning(f"PocketWorld HTTP {r.status_code}")
+            return None
+    except Exception as e:
+        log.warning(f"PocketWorld error: {e}")
+        return None
+
 
 def match_flight(flights, callsign_variants):
     """Busca un vuelo por variantes de callsign en los datos de PocketWorld"""
