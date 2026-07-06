@@ -89,9 +89,8 @@ def ping():
         ip = socket.gethostbyname("pocketworld.org")
         r = requests.get("https://pocketworld.org/api/flights", timeout=10,
                         headers={"User-Agent": "GenioTracker/1.0"})
-        data = r.json() if r.status_code == 200 else None
-        count = len(data) if isinstance(data, list) else 0
-        return jsonify({"status": "ok", "pocketworld_ip": ip, "http": r.status_code, "flights": count})
+        body = r.text[:500] if r.status_code == 200 else r.text[:200]
+        return jsonify({"status": "ok", "pocketworld_ip": ip, "http": r.status_code, "body_start": body})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
 
