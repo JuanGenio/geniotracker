@@ -81,6 +81,20 @@ def match_flight(flights, callsign_variants):
 def index():
     return render_template("index.html", flights=FLIGHTS)
 
+@app.route("/api/ping")
+def ping():
+    """Endpoint de prueba para verificar conectividad"""
+    import socket
+    try:
+        ip = socket.gethostbyname("pocketworld.org")
+        r = requests.get("https://pocketworld.org/api/flights", timeout=10,
+                        headers={"User-Agent": "GenioTracker/1.0"})
+        data = r.json() if r.status_code == 200 else None
+        count = len(data) if isinstance(data, list) else 0
+        return jsonify({"status": "ok", "pocketworld_ip": ip, "http": r.status_code, "flights": count})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)})
+
 @app.route("/api/track")
 def track():
     flight_key = request.args.get("flight", "IB418").upper()
