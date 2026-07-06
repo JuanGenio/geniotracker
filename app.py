@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Flight Tracker — Backend Flask
-Rastrea vuelos de Iberia en tiempo real via OpenSky Network (gratis, sin API key)
+Flight Tracker — Backend Flask v2
+Rastrea vuelos vía PocketWorld (sin API key, sin rate limit)
 """
 import json, time, logging
 from datetime import datetime, timezone
@@ -13,7 +13,6 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# ── Datos de los vuelos ──────────────────────────────────────────────────
 FLIGHTS = {
     "IB418": {
         "flight_iata": "IB418",
@@ -21,10 +20,8 @@ FLIGHTS = {
         "airline": "Iberia",
         "dep": {"code": "BCN", "name": "Barcelona", "lat": 41.2971, "lon": 2.0785},
         "arr": {"code": "MAD", "name": "Madrid", "lat": 40.4722, "lon": -3.5634},
-        "dep_time": "18:15",
-        "arr_time": "19:40",
-        "date": "2026-07-06",
-        "status": "scheduled"
+        "dep_time": "18:15", "arr_time": "19:40",
+        "date": "2026-07-06", "status": "scheduled"
     },
     "IB121": {
         "flight_iata": "IB121",
@@ -32,70 +29,46 @@ FLIGHTS = {
         "airline": "Iberia",
         "dep": {"code": "MAD", "name": "Madrid", "lat": 40.4722, "lon": -3.5634},
         "arr": {"code": "LIM", "name": "Lima", "lat": -12.0219, "lon": -77.1143},
-        "dep_time": "00:05",
-        "arr_time": "05:30",
-        "date": "2026-07-07",
-        "status": "scheduled"
+        "dep_time": "00:05", "arr_time": "05:30",
+        "date": "2026-07-07", "status": "scheduled"
     }
 }
 
-# ── Caché simple ────────────────────────────────────────────────────────
-_cache = {"data": None, "ts": 0, "ttl": 120}  # 120s de caché para no quemar rate limit
+_cache = {"data": None, "ts": 0, "ttl": 30}
 
-# ── Cuenta de intentos fallidos ──────────────────────────────────────────
-_failures = 0
-
-# ── Autenticación OpenSky (gratis, 60000 req/día en vez de 4000) ────────
-OPENSLY_USER = None  # Dejar None para anónimo, o poner tu email
-OPENSLY_PASS = None  # Contraseña de cuenta OpenSky
-
-def fetch_opensky():
-    """Obtiene estados de aeronaves desde múltiples zonas"""
-    # Zonas de búsqueda progresiva:
-    # 1. Europa (BCN→MAD)
-    # 2. Atlántico Norte (ruta hacia América)
-    # 3. Caribe/América Central (aproximación a Sudamérica)
-    # 4. Sudamérica (Perú/Brasil)
-    ZONES = [
-        (35, 46, -10, 5),     # Europa Occidental
-        (20, 36, -30, -10),   # Atlántico Norte
-        (10, 25, -60, -30),   # Caribe / Atlántico Oeste
-        (-15, 10, -85, -50),  # Sudamérica
-    ]
-    
-    all_states = []
-    for lamin, lamax, lomin, lomax in ZONES:
-        try:
-            url = f"https://opensky-network.org/api/states/all?lamin={lamin}&lamax={lamax}&lomin={lomin}&lomax={lomax}"
-            auth = (OPENSLY_USER, OPENSLY_PASS) if OPENSLY_USER else None
-            r = requests.get(url, timeout=8, auth=auth)
-            if r.status_code == 200:
-                states = r.json().get("states", [])
-                all_states.extend(states)
-        except Exception as e:
-            log.warning(f"OpenSky zone ({lamin},{lamax},{lomin},{lomax}): {e}")
-    
-    return all_states if all_states else None
-
-def match_flight(states, callsign_variants):
-    """Busca un vuelo por variantes de callsign"""
-    if not states:
+def fetch_pocketworld():
+    """Obtiene TODOS los vuelos en vivo desde PocketWorld (sin API key)"""
+    try:
+        r = requests.get("https://pocketworld.org/api/flights", timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list):
+                return data
         return None
-    for s in states:
-        if not s[1]:  # callsign puede ser None
-            continue
-        cs = s[1].strip()
-        if cs in callsign_variants or cs in [v.strip() for v in callsign_variants]:
+    except Exception as e:
+        log.warning(f"PocketWorld error: {e}")
+        return None
+
+def match_flight(flights, callsign_variants):
+    """Busca un vuelo por variantes de callsign en los datos de PocketWorld"""
+    if not flights:
+        return None
+    clean = [cs.strip().upper() for cs in callsign_variants]
+    for f in flights:
+        cs = (f.get("callsign") or "").strip().upper()
+        if cs in clean:
+            vel = f.get("velocity")  # m/s
+            alt = f.get("baro_alt") or f.get("alt")  # metros
             return {
-                "icao24": s[0],
-                "callsign": s[1].strip(),
-                "lat": s[6],
-                "lon": s[5],
-                "altitude_m": s[7],
-                "velocity_kmh": s[9] * 3.6 if s[9] else None,  # m/s → km/h
-                "direction": s[10],
-                "vertical_rate_ms": s[11],
-                "on_ground": s[8],
+                "icao24": f.get("icao24", ""),
+                "callsign": cs,
+                "lat": f.get("lat"),
+                "lon": f.get("lng"),
+                "altitude_m": alt,
+                "velocity_kmh": round(vel * 3.6, 1) if vel else None,
+                "direction": f.get("heading"),
+                "vertical_rate_ms": f.get("vertical_rate"),
+                "on_ground": f.get("on_ground", False),
                 "updated": datetime.now(timezone.utc).isoformat()
             }
     return None
@@ -107,32 +80,25 @@ def index():
 @app.route("/api/track")
 def track():
     flight_key = request.args.get("flight", "IB418").upper()
-    
     if flight_key not in FLIGHTS:
         return jsonify({"error": "Flight not found"}), 404
     
     flight = FLIGHTS[flight_key]
     
-    # Cache check
     now = time.time()
     if _cache["data"] and (now - _cache["ts"]) < _cache["ttl"]:
         cached_pos = _cache["data"].get(flight_key)
         if cached_pos:
             return jsonify(cached_pos)
     
-    # Fetch fresh data
-    states = fetch_opensky()
-    pos = match_flight(states, flight["callsign_variants"])
+    all_flights = fetch_pocketworld()
+    pos = match_flight(all_flights, flight["callsign_variants"])
     
     if not pos:
-        # No data from OpenSky for this flight
-        msg = "Avión aún no localizado en el radar"
-        if _failures > 3:
-            msg = "Radar agotado por hoy (límite gratis). Vuelve a intentar mañana o más tarde"
         return jsonify({
             "flight": flight_key,
             "found": False,
-            "message": msg,
+            "message": "Avión aún no localizado en el radar",
             "dep": flight["dep"],
             "arr": flight["arr"],
             "status": flight["status"]
@@ -140,9 +106,8 @@ def track():
     
     pos["flight"] = flight_key
     pos["found"] = True
-    pos["status"] = "en-route"
+    pos["status"] = "en-route" if not pos.get("on_ground") else "landed"
     
-    # Update cache
     if not _cache["data"]:
         _cache["data"] = {}
     _cache["data"][flight_key] = pos
@@ -151,28 +116,19 @@ def track():
     return jsonify(pos)
 
 @app.route("/api/all")
-def all_flights():
-    """Devuelve datos de todos los vuelos configurados"""
-    states = fetch_opensky()
+def all_flights_endpoint():
+    flights = fetch_pocketworld()
     results = {}
-    
     for key, flight in FLIGHTS.items():
-        pos = match_flight(states, flight["callsign_variants"])
+        pos = match_flight(flights, flight["callsign_variants"])
         if pos:
             pos["flight"] = key
             pos["found"] = True
-            pos["status"] = "en-route"
+            pos["status"] = "en-route" if not pos.get("on_ground") else "landed"
         else:
-            pos = {
-                "flight": key,
-                "found": False,
-                "message": "Aún no localizado en el radar",
-                "dep": flight["dep"],
-                "arr": flight["arr"],
-                "status": flight["status"]
-            }
+            pos = {"flight": key, "found": False, "message": "No localizado",
+                   "dep": flight["dep"], "arr": flight["arr"], "status": flight["status"]}
         results[key] = pos
-    
     return jsonify(results)
 
 if __name__ == "__main__":
